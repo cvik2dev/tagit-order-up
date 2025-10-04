@@ -8,6 +8,7 @@ import { BottomNav } from "./components/BottomNav";
 import Home from "./pages/Home";
 import Items from "./pages/Items";
 import Order from "./pages/Order";
+import BulkOrder from "./pages/BulkOrder";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => {
               <Route path="/" element={<Home />} />
               <Route path="/items" element={<Items />} />
               <Route path="/order" element={<Order />} />
+              <Route path="/bulk" element={<BulkOrder />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

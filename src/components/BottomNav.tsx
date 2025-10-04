@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Package, ShoppingCart, Settings } from 'lucide-react';
+import { Home, Package, ShoppingCart, FileText, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/items', icon: Package, label: 'Items' },
   { path: '/order', icon: ShoppingCart, label: 'Order' },
+  { path: '/bulk', icon: FileText, label: 'Bulk' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
