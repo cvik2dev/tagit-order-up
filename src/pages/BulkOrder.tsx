@@ -5,12 +5,14 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, FileText, Search, Send, Plus, GripVertical } from 'lucide-react';
+import { Trash2, FileText, Search, Send, Plus, GripVertical, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
-import { DndContext, DragOverlay, closestCorners, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { DndContext, DragOverlay, closestCorners, DragEndEvent, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Item } from '@/types';
+import { nanoid } from 'nanoid';
+import { SupplierSelector } from '@/components/SupplierSelector';
 
 interface ParsedItem {
   id: string;
@@ -80,25 +82,40 @@ function SortableItem({ item, onRemove, onQuantityChange }: {
 }
 
 export default function BulkOrder() {
-  const { items, suppliers, addToOrder } = useApp();
+  const { items, suppliers, addToOrder, addSupplier } = useApp();
   const [rawText, setRawText] = useState('');
   const [showFullText, setShowFullText] = useState(false);
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([]);
   const [supplierCards, setSupplierCards] = useState<SupplierCard[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
 
   const cleanText = () => {
+    if (!rawText.trim()) {
+      toast.error('No text to clean');
+      return;
+    }
+    
     const cleaned = rawText
       .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
       .map(line => {
+        let cleaned = line.trim();
         // Remove bullets, dashes, asterisks at start
-        let cleaned = line.replace(/^[-•*]\s*/, '');
-        // Remove list numbers like "1. " or "1) "
-        cleaned = cleaned.replace(/^\d+[.)]\s*/, '');
-        return cleaned;
+        cleaned = cleaned.replace(/^[-•*●○■□▪▫⦿⦾]\s*/g, '');
+        // Remove list numbers like "1. " or "1) " or "1- "
+        cleaned = cleaned.replace(/^\d+[.)\-]\s*/g, '');
+        // Remove markdown checkbox
+        cleaned = cleaned.replace(/^\[[ x]\]\s*/gi, '');
+        return cleaned.trim();
       })
+      .filter(line => line.length > 0)
       .join('\n');
     
     setRawText(cleaned);
@@ -106,27 +123,32 @@ export default function BulkOrder() {
   };
 
   const parseAndMatch = () => {
+    if (!rawText.trim()) {
+      toast.error('No text to parse');
+      return;
+    }
+    
     const lines = rawText.split('\n').filter(line => line.trim().length > 0);
     const parsed: ParsedItem[] = [];
 
     lines.forEach((line, idx) => {
-      // Try to extract quantity from end of line
-      const qtyMatch = line.match(/\s+(\d+)\s*$/);
-      let name = line;
+      let name = line.trim();
       let quantity = 1;
 
+      // Try to extract quantity from end of line (supports various formats)
+      const qtyMatch = name.match(/\s+(\d+)\s*$/);
       if (qtyMatch) {
-        quantity = parseInt(qtyMatch[1]);
-        name = line.substring(0, line.lastIndexOf(qtyMatch[1])).trim();
+        quantity = parseInt(qtyMatch[1], 10);
+        name = name.substring(0, name.lastIndexOf(qtyMatch[1])).trim();
       }
 
-      // Try to match with existing items
+      // Try to match with existing items (case-insensitive, flexible matching)
       const matchedItem = items.find(
-        item => item.name.toLowerCase() === name.toLowerCase()
+        item => item.name.toLowerCase().trim() === name.toLowerCase().trim()
       );
 
       parsed.push({
-        id: `parsed-${idx}-${Date.now()}`,
+        id: `parsed-${idx}-${Date.now()}-${Math.random()}`,
         rawText: line,
         name: name,
         quantity: quantity,
@@ -144,7 +166,7 @@ export default function BulkOrder() {
     const supplierGroups = new Set(matched.map(p => p.supplier).filter(Boolean));
 
     toast.success(
-      `Found ${matched.length} items from ${supplierGroups.size} suppliers and ${newItems.length} new items`
+      `Found ${matched.length} items from ${supplierGroups.size} supplier${supplierGroups.size !== 1 ? 's' : ''} and ${newItems.length} new item${newItems.length !== 1 ? 's' : ''}`
     );
   };
 
@@ -239,27 +261,30 @@ export default function BulkOrder() {
     const { active, over } = event;
     setActiveId(null);
 
-    if (!over) return;
+    if (!over || active.id === over.id) return;
 
     // Find which card the item is being dragged from
     const fromCard = supplierCards.find(card => 
       card.items.some(item => item.id === active.id)
     );
 
-    // Find which card it's being dragged to (over.id could be a card id or item id)
+    if (!fromCard) return;
+
+    const draggedItem = fromCard.items.find(i => i.id === active.id);
+    if (!draggedItem) return;
+
+    // Find which card it's being dragged to
+    // First check if over.id is a card id
     let toCard = supplierCards.find(card => card.id === over.id);
     
+    // If not, check if over.id is an item id and find its parent card
     if (!toCard) {
-      // If over.id is an item, find its card
       toCard = supplierCards.find(card => 
         card.items.some(item => item.id === over.id)
       );
     }
 
-    if (!fromCard || !toCard) return;
-
-    const draggedItem = fromCard.items.find(i => i.id === active.id);
-    if (!draggedItem) return;
+    if (!toCard) return;
 
     // If dragging to a different card
     if (fromCard.id !== toCard.id) {
@@ -282,6 +307,22 @@ export default function BulkOrder() {
       );
 
       toast.success(`Moved to ${toCard.supplier}`);
+    } else {
+      // Reordering within the same card
+      const oldIndex = fromCard.items.findIndex(i => i.id === active.id);
+      const newIndex = fromCard.items.findIndex(i => i.id === over.id);
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const reorderedItems = [...fromCard.items];
+        const [movedItem] = reorderedItems.splice(oldIndex, 1);
+        reorderedItems.splice(newIndex, 0, movedItem);
+        
+        setSupplierCards(
+          supplierCards.map(card => 
+            card.id === fromCard.id ? { ...card, items: reorderedItems } : card
+          )
+        );
+      }
     }
   };
 
@@ -389,6 +430,7 @@ export default function BulkOrder() {
             </div>
 
             <DndContext
+              sensors={sensors}
               collisionDetection={closestCorners}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -397,16 +439,20 @@ export default function BulkOrder() {
                 {supplierCards.map(card => (
                   <Card key={card.id} className="p-4 space-y-3 bg-card/50">
                     <div className="flex items-center gap-2">
-                      <Input
+                      <SupplierSelector
                         value={card.supplier}
-                        onChange={(e) => updateCardSupplier(card.id, e.target.value)}
-                        className="font-semibold"
+                        suppliers={suppliers}
+                        onSelect={(supplier) => updateCardSupplier(card.id, supplier)}
+                        onCreateNew={(name) => {
+                          addSupplier({ name });
+                          updateCardSupplier(card.id, name);
+                        }}
                       />
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => removeCard(card.id)}
-                        className="h-8 w-8 p-0"
+                        className="h-8 w-8 p-0 shrink-0"
                       >
                         <Trash2 className="w-4 h-4 text-destructive" />
                       </Button>
@@ -420,7 +466,15 @@ export default function BulkOrder() {
                       items={card.items.map(i => i.id)}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-2 min-h-[100px]" id={card.id}>
+                      <div 
+                        className="space-y-2 min-h-[100px] p-2 rounded-lg border-2 border-dashed border-border/50" 
+                        id={card.id}
+                      >
+                        {card.items.length === 0 && (
+                          <p className="text-muted-foreground text-sm text-center py-4">
+                            Drag items here
+                          </p>
+                        )}
                         {card.items.map(item => (
                           <SortableItem
                             key={item.id}
